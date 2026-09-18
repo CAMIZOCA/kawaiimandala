@@ -47,11 +47,21 @@ class MandalaStorageService
         string $bytes,
         ?string $originalName = null,
         string $source = 'manual',
-        ?string $prompt = null,
+        ?string $finalPrompt = null,
+        ?string $completedToken = null,
     ): Mandala {
         [$width, $height, $extension] = $this->inspect($bytes);
 
-        if ($source === 'activepieces' && $this->needsUpscale($width, $height)) {
+        $fromFlow = $source === 'activepieces';
+
+        if ($fromFlow && $extension !== 'png') {
+            throw new InvalidMandalaImageException('La imagen de Activepieces debe ser un PNG.');
+        }
+
+        $original = null;
+
+        if ($fromFlow && $this->needsUpscale($width, $height)) {
+            $original = $bytes;
             $target = (int) config('kawaii.target_image_px');
             $bytes = $this->processor->normalize($bytes, $target);
             [$width, $height, $extension] = [$target, $target, 'png'];
@@ -60,22 +70,36 @@ class MandalaStorageService
         $disk = Storage::disk('local');
         $this->deleteImage($mandala);
 
-        $path = $mandala->book->storageDir('mandalas').'/'.str_pad((string) $mandala->position, 3, '0', STR_PAD_LEFT).'.'.$extension;
+        $name = str_pad((string) $mandala->position, 3, '0', STR_PAD_LEFT);
+        $path = $mandala->book->storageDir('mandalas').'/'.$name.'.'.$extension;
         $disk->put($path, $bytes);
+
+        // Keep the image as the flow delivered it (~1024 px) next to the upscaled copy.
+        $originalPath = null;
+        if ($original !== null) {
+            $originalPath = $mandala->book->storageDir('mandalas/originals').'/'.$name.'.png';
+            $disk->put($originalPath, $original);
+        }
 
         $mandala->forceFill([
             'image_path' => $path,
+            'original_image_path' => $originalPath,
             'original_filename' => $originalName !== null ? mb_substr(basename($originalName), 0, 255) : null,
             'width_px' => $width,
             'height_px' => $height,
             'generation_source' => $source,
             'generation_status' => GenerationStatus::Done,
             'request_token' => null,
+            // The token/secret of the answered request stay so a repeated callback is a no-op.
+            'completed_token' => $completedToken,
+            'callback_secret_hash' => $completedToken !== null ? $mandala->callback_secret_hash : null,
             'generation_error' => null,
+            'error_code' => null,
+            'responded_at' => $completedToken !== null ? now() : null,
         ]);
 
-        if ($prompt !== null) {
-            $mandala->prompt = $prompt;
+        if ($finalPrompt !== null) {
+            $mandala->final_prompt = $finalPrompt;
         }
 
         $mandala->save();
@@ -86,8 +110,10 @@ class MandalaStorageService
 
     public function deleteImage(Mandala $mandala): void
     {
-        if ($mandala->image_path !== null) {
-            Storage::disk('local')->delete($mandala->image_path);
+        $paths = array_filter([$mandala->image_path, $mandala->original_image_path]);
+
+        if ($paths !== []) {
+            Storage::disk('local')->delete($paths);
         }
     }
 

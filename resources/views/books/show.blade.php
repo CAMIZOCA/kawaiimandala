@@ -54,8 +54,6 @@
     <h2 style="margin-top:0">Generar con Activepieces</h2>
     @if (! $apOn)
         <div class="flash warn" style="margin-bottom:0">Activepieces está desactivado. Pon <code>ACTIVEPIECES_ENABLED=1</code> en <code>.env</code> para poder generar mandalas con AI (la carga manual sigue funcionando).</div>
-    @elseif (! $ap->hasValidSecret())
-        <div class="flash warn" style="margin-bottom:0">Falta <code>ACTIVEPIECES_SHARED_SECRET</code> (mínimo {{ \App\Services\ActivepiecesClient::MIN_SECRET_LENGTH }} caracteres) en <code>.env</code>.</div>
     @else
         <p class="muted">Cada página tiene su propio flujo en Activepieces; el flujo genera el mandala del animal «{{ $book->animal_theme }}» y devuelve la imagen para guardarla en su slot. Puedes pedir un mandala suelto o «por turno», uno a la vez.</p>
         @if ($warning = $ap->publicUrlWarning())
@@ -98,8 +96,8 @@
             <div class="meta">
                 @if ($mandala->isInFlight())
                     <span class="badge requested"><span class="spinner"></span> solicitado {{ $mandala->requested_at->format('H:i') }}@if ($mandala->generation_attempts > 1) · intento {{ $mandala->generation_attempts }}@endif</span>
-                @elseif ($mandala->generation_status === \App\Enums\GenerationStatus::Failed)
-                    <span class="badge failed">error</span> {{ $mandala->generation_error }}
+                @elseif ($mandala->generation_status->isError())
+                    <span class="badge failed">{{ $mandala->generation_status === \App\Enums\GenerationStatus::Timeout ? 'sin respuesta' : 'error' }}</span> {{ $mandala->generation_error }}
                 @endif
             </div>
         @endif
@@ -110,7 +108,7 @@
             <form method="POST" action="{{ route('books.mandalas.generate', [$book, $mandala->position]) }}">
                 @csrf
                 <button class="btn small" type="submit" @disabled($mandala->isInFlight() || in_array($mandala->position, $flowless, true))>
-                    @if ($mandala->isInFlight()) Esperando… @elseif ($mandala->hasImage()) Regenerar con AI @elseif ($mandala->generation_status === \App\Enums\GenerationStatus::Failed) Reintentar @else Generar con AI @endif
+                    @if ($mandala->isInFlight()) Esperando… @elseif ($mandala->hasImage()) Regenerar con AI @elseif ($mandala->generation_status->isError()) Reintentar @else Generar con AI @endif
                 </button>
             </form>
         @endif

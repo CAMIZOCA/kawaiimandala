@@ -7,7 +7,13 @@ use Illuminate\Database\Eloquent\Model;
 /** Link to the Activepieces flow that generates the mandala of one page position. */
 class MandalaFlow extends Model
 {
-    protected $fillable = ['position', 'flow_url', 'enabled'];
+    protected $fillable = ['position', 'name', 'flow_id', 'flow_url', 'enabled'];
+
+    /** Flow id embedded in an Activepieces webhook URL (…/webhooks/{flow_id}), if any. */
+    public static function flowIdFromUrl(?string $url): ?string
+    {
+        return $url !== null && preg_match('#/webhooks/([A-Za-z0-9_-]+)#', $url, $m) ? $m[1] : null;
+    }
 
     protected function casts(): array
     {

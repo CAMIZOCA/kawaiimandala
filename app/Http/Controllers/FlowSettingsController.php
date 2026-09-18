@@ -35,10 +35,17 @@ class FlowSettingsController extends Controller
                 continue;
             }
 
-            MandalaFlow::updateOrCreate(
-                ['position' => (int) $position],
-                ['flow_url' => $url !== '' ? $url : null, 'enabled' => (bool) ($data['enabled'] ?? true)],
-            );
+            $attributes = ['flow_url' => $url !== '' ? $url : null, 'enabled' => (bool) ($data['enabled'] ?? true)];
+
+            // Keep the flow id in step with the pasted webhook URL; name new rows.
+            if ($url !== '') {
+                $attributes['flow_id'] = MandalaFlow::flowIdFromUrl($url);
+            }
+            if ($flow?->name === null) {
+                $attributes['name'] = 'Mandala '.str_pad((string) $position, 2, '0', STR_PAD_LEFT);
+            }
+
+            MandalaFlow::updateOrCreate(['position' => (int) $position], $attributes);
         }
 
         return redirect()->route('settings.flows.edit')->with('status', 'Enlaces de flujos guardados.');

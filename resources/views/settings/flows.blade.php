@@ -12,10 +12,6 @@
             @else <span class="badge failed">desactivada</span> Pon <code>ACTIVEPIECES_ENABLED=1</code> en <code>.env</code>. @endif
         </li>
         <li>
-            @if ($client->hasValidSecret()) <span class="badge ready">secreto OK</span>
-            @else <span class="badge failed">falta secreto</span> Define <code>ACTIVEPIECES_SHARED_SECRET</code> (mínimo {{ \App\Services\ActivepiecesClient::MIN_SECRET_LENGTH }} caracteres) en <code>.env</code>. @endif
-        </li>
-        <li>
             @if ($warning = $client->publicUrlWarning()) <span class="badge requested">revisar</span> {{ $warning }}
             @else <span class="badge ready">URL pública OK</span> @endif
             <div class="muted">Callback: <code>{{ $client->publicUrl() }}/api/activepieces/books/{book_uuid}/mandalas/{posición}</code></div>
@@ -31,7 +27,7 @@
     @csrf @method('PUT')
     @error('flows')<div class="err">{{ $message }}</div>@enderror
     <table>
-        <thead><tr><th style="width:6rem">Mandala</th><th>Enlace del flujo (webhook)</th><th style="width:6rem">Activo</th><th style="width:8rem">Estado</th></tr></thead>
+        <thead><tr><th style="width:8rem">Mandala</th><th>Enlace del flujo (webhook)</th><th style="width:6rem">Activo</th><th style="width:8rem">Estado</th></tr></thead>
         <tbody>
         @foreach (range(1, $rows) as $position)
             @php
@@ -40,7 +36,10 @@
                 $enabled = old("flows.$position.enabled", $flow?->enabled ?? true);
             @endphp
             <tr>
-                <td><strong>{{ str_pad($position, 2, '0', STR_PAD_LEFT) }}</strong></td>
+                <td>
+                    <strong>{{ $flow?->name ?: 'Mandala '.str_pad($position, 2, '0', STR_PAD_LEFT) }}</strong>
+                    @if ($flow?->flow_id)<div class="muted" style="font-size:.75rem"><code>{{ $flow->flow_id }}</code></div>@endif
+                </td>
                 <td>
                     <input type="url" name="flows[{{ $position }}][flow_url]" value="{{ $url }}" placeholder="https://activepieces.medio-digital.net/api/v1/webhooks/…">
                     @error("flows.$position.flow_url")<div class="err">{{ $message }}</div>@enderror

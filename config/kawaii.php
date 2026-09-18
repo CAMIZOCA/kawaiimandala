@@ -6,7 +6,8 @@ return [
 
     'default_mandala_count' => (int) env('KAWAII_DEFAULT_MANDALA_COUNT', 22),
     'min_mandalas' => 1,
-    'max_mandalas' => 60,
+    // One Activepieces flow exists per page position (22), so a book cannot have more.
+    'max_mandalas' => 22,
 
     // Print size (KDP interior, no bleed). 1 inch = 25.4 mm.
     'page_mm' => 215.9,
@@ -25,11 +26,15 @@ return [
 
     'activepieces' => [
         'enabled' => (bool) env('ACTIVEPIECES_ENABLED', false),
-        'shared_secret' => env('ACTIVEPIECES_SHARED_SECRET'),
+        'base_url' => env('ACTIVEPIECES_BASE_URL', 'https://activepieces.medio-digital.net'),
         'public_url' => env('APP_PUBLIC_URL'),
         'style_profile' => 'kawaii_mandala_v1',
         'request_timeout_seconds' => 15,
-        // A "requested" slot may be re-requested after this many minutes.
+        // Pages generating at the same time (1–5). OpenAI may answer 429 when this is high.
+        'max_concurrent' => max(1, min(5, (int) env('ACTIVEPIECES_MAX_CONCURRENT', 1))),
+        // OpenAI rejects prompts above 32 000 characters in total; the flow adds its own text.
+        'max_prompt_chars' => 30000,
+        // A "requested" slot without a callback becomes "timeout" after this many minutes.
         'stale_after_minutes' => 10,
         'download_timeout_seconds' => 60,
     ],

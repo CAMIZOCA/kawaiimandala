@@ -15,6 +15,7 @@ class Mandala extends Model
         return [
             'generation_status' => GenerationStatus::class,
             'requested_at' => 'datetime',
+            'responded_at' => 'datetime',
             'position' => 'integer',
             'width_px' => 'integer',
             'height_px' => 'integer',

@@ -6,18 +6,19 @@ use App\Enums\GenerationStatus;
 use App\Models\Book;
 use App\Models\MandalaFlow;
 use App\Models\User;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Tests\Concerns\ActivepiecesHelpers;
 use Tests\TestCase;
 
 /** One flow per page position, missing-link messages, timeouts, error codes, upscale. */
 class ActivepiecesFlowsTest extends TestCase
 {
+    use ActivepiecesHelpers;
     use RefreshDatabase;
-
-    private const SECRET = 'a-very-long-shared-secret-1234567890';
 
     private Book $book;
 
@@ -27,7 +28,6 @@ class ActivepiecesFlowsTest extends TestCase
         Storage::fake('local');
         config([
             'kawaii.activepieces.enabled' => true,
-            'kawaii.activepieces.shared_secret' => self::SECRET,
             'kawaii.activepieces.public_url' => 'https://app.test',
         ]);
 
@@ -50,9 +50,12 @@ class ActivepiecesFlowsTest extends TestCase
         return file_get_contents(MandalaUploadTest::png('x.png', $w, $h)->getRealPath());
     }
 
-    private function postCallback(int $position, array $body)
+    /** Send the webhook request for a page (secret and token are read back from the recorded call). */
+    private function request(int $position): void
     {
-        return $this->postJson("/api/activepieces/books/{$this->book->uuid}/mandalas/{$position}", $body, ['X-Callback-Secret' => self::SECRET]);
+        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
+        $this->flow($position);
+        $this->actingAs(User::factory()->create())->post("/books/{$this->book->uuid}/mandalas/{$position}/generate");
     }
 
     // ------------------------------------------------- one flow per position
@@ -134,15 +137,11 @@ class ActivepiecesFlowsTest extends TestCase
             ->assertSee(route('settings.flows.edit'), false);
     }
 
-    public function test_book_page_explains_when_integration_is_disabled_or_secret_missing(): void
+    public function test_book_page_explains_when_integration_is_disabled(): void
     {
-        $user = User::factory()->create();
-
         config(['kawaii.activepieces.enabled' => false]);
-        $this->actingAs($user)->get("/books/{$this->book->uuid}")->assertSee('Activepieces está desactivado');
 
-        config(['kawaii.activepieces.enabled' => true, 'kawaii.activepieces.shared_secret' => 'short']);
-        $this->actingAs($user)->get("/books/{$this->book->uuid}")->assertSee('Falta')->assertSee('ACTIVEPIECES_SHARED_SECRET');
+        $this->actingAs(User::factory()->create())->get("/books/{$this->book->uuid}")->assertSee('Activepieces está desactivado');
     }
 
     public function test_attempt_counter_increases_on_each_request(): void
@@ -159,7 +158,7 @@ class ActivepiecesFlowsTest extends TestCase
 
     // ---------------------------------------------------------------- timeout
 
-    public function test_stale_request_becomes_failed_and_stops_the_queue(): void
+    public function test_stale_request_becomes_timeout_and_stops_the_queue(): void
     {
         Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
         foreach ([1, 2, 3] as $p) {
@@ -176,8 +175,8 @@ class ActivepiecesFlowsTest extends TestCase
             ->assertSee('Sin respuesta de Activepieces tras 10 min')
             ->assertSee('Reintentar');
 
-        $this->assertSame(GenerationStatus::Failed, $this->slot(1)->generation_status);
-        $this->assertNull($this->slot(1)->request_token);
+        $this->assertSame(GenerationStatus::Timeout, $this->slot(1)->generation_status);
+        $this->assertSame('timeout', $this->slot(1)->error_code);
         $this->assertFalse($this->book->fresh()->ai_queue_active);
     }
 
@@ -193,15 +192,32 @@ class ActivepiecesFlowsTest extends TestCase
         $this->assertSame(GenerationStatus::Requested, $this->slot(1)->generation_status);
     }
 
+    public function test_expire_command_times_out_requests_of_every_book_and_is_scheduled(): void
+    {
+        $other = Book::create(['title' => 'O', 'animal_theme' => 'Fox', 'mandala_count' => 2]);
+        $other->syncSlots();
+        $this->book->mandalas()->where('position', 1)->update(['generation_status' => 'requested', 'requested_at' => now()->subMinutes(11)]);
+        $other->mandalas()->where('position', 1)->update(['generation_status' => 'requested', 'requested_at' => now()->subMinutes(11)]);
+        $this->book->mandalas()->where('position', 2)->update(['generation_status' => 'requested', 'requested_at' => now()->subMinutes(3)]);
+
+        $this->artisan('activepieces:expire-stale')->expectsOutputToContain('2 solicitud')->assertSuccessful();
+
+        $this->assertSame(GenerationStatus::Timeout, $this->slot(1)->generation_status);
+        $this->assertSame(GenerationStatus::Timeout, $other->mandalas()->where('position', 1)->first()->generation_status);
+        $this->assertSame(GenerationStatus::Requested, $this->slot(2)->generation_status, 'a recent request is left alone');
+
+        $scheduled = collect(app(Schedule::class)->events())
+            ->contains(fn ($event) => str_contains($event->command, 'activepieces:expire-stale') && $event->expression === '* * * * *');
+        $this->assertTrue($scheduled);
+    }
+
     // ------------------------------------------------------------ error codes
 
     public function test_error_callback_stores_the_error_code(): void
     {
-        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
-        $this->flow(1);
-        $this->actingAs(User::factory()->create())->post("/books/{$this->book->uuid}/mandalas/1/generate");
+        $this->request(1);
 
-        $this->postCallback(1, ['request_token' => $this->slot(1)->request_token, 'error' => 'blocked by policy', 'error_code' => 'content_policy'])
+        $this->postCallback(1, $this->withIssuedToken(1, ['error' => 'blocked by policy', 'error_code' => 'content_policy']))
             ->assertOk()->assertJson(['ok' => false]);
 
         $this->assertSame('[content_policy] blocked by policy', $this->slot(1)->generation_error);
@@ -211,7 +227,8 @@ class ActivepiecesFlowsTest extends TestCase
 
     public function test_small_ai_image_is_upscaled_to_print_size(): void
     {
-        $this->postCallback(2, ['image_base64' => base64_encode($this->png(1024, 1024))])->assertOk();
+        $this->request(2);
+        $this->postCallback(2, $this->withIssuedToken(2, ['image_base64' => base64_encode($this->png(1024, 1024))]))->assertOk();
 
         $m = $this->slot(2);
         $this->assertSame([2550, 2550], [$m->width_px, $m->height_px]);
@@ -223,7 +240,8 @@ class ActivepiecesFlowsTest extends TestCase
 
     public function test_non_square_ai_image_is_padded_to_a_square(): void
     {
-        $this->postCallback(1, ['image_base64' => base64_encode($this->png(1024, 600))])->assertOk();
+        $this->request(1);
+        $this->postCallback(1, $this->withIssuedToken(1, ['image_base64' => base64_encode($this->png(1024, 600))]))->assertOk();
 
         $this->assertSame([2550, 2550], [$this->slot(1)->width_px, $this->slot(1)->height_px]);
     }
@@ -232,7 +250,8 @@ class ActivepiecesFlowsTest extends TestCase
     {
         config(['kawaii.auto_upscale' => false]);
 
-        $this->postCallback(1, ['image_base64' => base64_encode($this->png(400, 400))])->assertOk();
+        $this->request(1);
+        $this->postCallback(1, $this->withIssuedToken(1, ['image_base64' => base64_encode($this->png(400, 400))]))->assertOk();
 
         $this->assertSame([400, 400], [$this->slot(1)->width_px, $this->slot(1)->height_px]);
     }
@@ -240,9 +259,11 @@ class ActivepiecesFlowsTest extends TestCase
     public function test_full_size_ai_image_is_stored_untouched(): void
     {
         $bytes = $this->png(2550, 2550);
-        $this->postCallback(1, ['image_base64' => base64_encode($bytes)])->assertOk();
+        $this->request(1);
+        $this->postCallback(1, $this->withIssuedToken(1, ['image_base64' => base64_encode($bytes)]))->assertOk();
 
         $this->assertSame($bytes, Storage::disk('local')->get($this->slot(1)->image_path));
+        $this->assertNull($this->slot(1)->original_image_path, 'nothing to keep when the image was not touched');
     }
 
     public function test_manual_uploads_are_never_upscaled(): void

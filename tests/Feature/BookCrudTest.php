@@ -56,7 +56,7 @@ class BookCrudTest extends TestCase
         $this->actingAs($user)->post('/books', $this->payload(['title' => '']))->assertSessionHasErrors('title');
         $this->actingAs($user)->post('/books', $this->payload(['animal_theme' => '']))->assertSessionHasErrors('animal_theme');
         $this->actingAs($user)->post('/books', $this->payload(['mandala_count' => 0]))->assertSessionHasErrors('mandala_count');
-        $this->actingAs($user)->post('/books', $this->payload(['mandala_count' => 61]))->assertSessionHasErrors('mandala_count');
+        $this->actingAs($user)->post('/books', $this->payload(['mandala_count' => 23]))->assertSessionHasErrors('mandala_count');
         $this->actingAs($user)->post('/books', $this->payload(['title' => str_repeat('a', 256)]))->assertSessionHasErrors('title');
         $this->assertSame(0, Book::count());
     }
@@ -64,11 +64,11 @@ class BookCrudTest extends TestCase
     public function test_changing_count_adds_and_removes_empty_slots(): void
     {
         $user = User::factory()->create();
-        $this->actingAs($user)->post('/books', $this->payload());
+        $this->actingAs($user)->post('/books', $this->payload(['mandala_count' => 12]));
         $book = Book::firstOrFail();
 
-        $this->actingAs($user)->put("/books/{$book->uuid}", $this->payload(['mandala_count' => 24]))->assertSessionHasNoErrors();
-        $this->assertSame(24, $book->mandalas()->count());
+        $this->actingAs($user)->put("/books/{$book->uuid}", $this->payload(['mandala_count' => 22]))->assertSessionHasNoErrors();
+        $this->assertSame(22, $book->mandalas()->count());
 
         $this->actingAs($user)->put("/books/{$book->uuid}", $this->payload(['mandala_count' => 10]))->assertSessionHasNoErrors();
         $this->assertSame(10, $book->mandalas()->count());

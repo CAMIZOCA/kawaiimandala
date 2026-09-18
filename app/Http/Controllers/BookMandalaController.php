@@ -87,9 +87,11 @@ class BookMandalaController extends Controller
 
         $this->storage->deleteImage($mandala);
         $mandala->forceFill([
-            'image_path' => null, 'original_filename' => null, 'width_px' => null, 'height_px' => null,
+            'image_path' => null, 'original_image_path' => null, 'original_filename' => null,
+            'width_px' => null, 'height_px' => null,
             'generation_status' => GenerationStatus::Pending, 'request_token' => null,
-            'requested_at' => null, 'generation_error' => null,
+            'callback_secret_hash' => null, 'completed_token' => null, 'final_prompt' => null,
+            'requested_at' => null, 'responded_at' => null, 'generation_error' => null, 'error_code' => null,
         ])->save();
         $book->refresh()->refreshStatus();
 

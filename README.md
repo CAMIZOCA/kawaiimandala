@@ -38,8 +38,10 @@ KAWAII_ALLOW_LOW_RES_EXPORT=false   # solo desarrollo: permite exportar con imá
 KAWAII_AUTO_UPSCALE=true            # escala a 2550 px las imágenes de Activepieces menores
 
 ACTIVEPIECES_ENABLED=0
-ACTIVEPIECES_SHARED_SECRET=         # mínimo 16 caracteres
-APP_PUBLIC_URL=                     # URL pública de esta app, alcanzable desde Activepieces
+ACTIVEPIECES_BASE_URL=https://activepieces.medio-digital.net
+ACTIVEPIECES_MAX_CONCURRENT=1       # páginas generándose a la vez (1–5); más de 1 puede dar 429 de OpenAI
+APP_PUBLIC_URL=                     # URL pública HTTPS de esta app, alcanzable desde Activepieces
+QUEUE_CONNECTION=database           # el envío al webhook va en cola: hace falta un worker
 ```
 
 Los demás valores (tamaño de página, márgenes, mínimos de resolución, límites) están en `config/kawaii.php`.
@@ -78,7 +80,7 @@ Los nombres de las imágenes son internos (`001.png`, `002.jpg`…); el nombre o
 
 ## Book Pagination Rules
 
-Para `N` mandalas (por defecto **22**; aceptado de 1 a 60). `BookPaginationService` es la única fuente de verdad:
+Para `N` mandalas (por defecto **22**; aceptado de 1 a 22, uno por flujo de Activepieces). `BookPaginationService` es la única fuente de verdad:
 
 ```text
 página 1                   = título interior            (derecha)
@@ -106,19 +108,26 @@ Activepieces es solo una integración por webhook, encapsulada en `App\Services\
 **Un flujo por página.** Cada posición de mandala (1…N) tiene su propio flujo en Activepieces con su propia estructura de mandala; el flujo recibe el **animal** del libro y genera esa página. Los mismos flujos sirven para todos los libros. El prompt para que Cowork cree los 22 flujos está en [`docs/PROMPT_COWORK_ACTIVEPIECES.md`](docs/PROMPT_COWORK_ACTIVEPIECES.md).
 
 ### Configuración
-1. `.env`: `ACTIVEPIECES_ENABLED=1`, `ACTIVEPIECES_SHARED_SECRET` (≥ 16 caracteres) y `APP_PUBLIC_URL` (URL pública de esta app, alcanzable **desde el servidor de Activepieces**; con `localhost` hace falta un túnel como cloudflared/ngrok o desplegar la app).
-2. En la app: **Configuración → Flujos** (`/settings/flows`): pega el enlace del webhook (URL de producción) de cada mandala. Cada fila se puede desactivar. La página avisa si falta el secreto, si `APP_PUBLIC_URL` parece local o cuántos flujos faltan.
-3. En la ficha del libro: **Generar con AI** por slot (o *Regenerar/Reintentar*) y **Generar los pendientes por turno** (cola: un mandala a la vez; al recibir su imagen se solicita el siguiente).
+1. `.env`: `ACTIVEPIECES_ENABLED=1`, `ACTIVEPIECES_BASE_URL` y `APP_PUBLIC_URL` (URL pública **HTTPS** de esta app, alcanzable **desde el servidor de Activepieces**; con `localhost` hace falta un túnel como cloudflared/ngrok o desplegar la app). No hay secreto en `.env`: cada solicitud genera el suyo.
+2. Cargar los 22 flujos («Mandala 01…22», carpeta *Kawaii Mandala*): `php artisan db:seed --class=MandalaFlowSeeder` (idempotente; vuelve a poner nombre, `flow_id` y URL de cada posición, pero respeta los flujos desactivados). Después se editan en **Configuración → Flujos** (`/settings/flows`); cada fila se puede desactivar. La página avisa si `APP_PUBLIC_URL` parece local o cuántos flujos faltan.
+3. **Worker de cola** (el POST al webhook va en el job `SendMandalaRequest`): `php artisan queue:work --tries=1 --timeout=60` (Supervisor en producción).
+4. **Scheduler** (marca `timeout` las solicitudes sin respuesta): cron `* * * * * php artisan schedule:run`, que ejecuta `activepieces:expire-stale` cada minuto.
+5. En la ficha del libro: **Generar con AI** por slot (o *Regenerar/Reintentar*) y **Generar los pendientes por turno** (cola: se mantienen `ACTIVEPIECES_MAX_CONCURRENT` mandalas en curso y, al recibir cada imagen, se solicita el siguiente).
+
+Cada libro admite hasta **22** mandalas porque hay un flujo por posición: la posición N usa siempre el webhook del «Mandala N».
+
+### Estados de cada página
+`pending → requested → done | failed | timeout`. Se guardan `error` / `error_code` (`openai_error`, `content_policy`, `empty_image`, `dispatch_error`, `timeout`…), la fecha de solicitud y de respuesta, el número de intento y el prompt final que usó el flujo (`final_prompt`; `prompt` es solo para notas extra del usuario, máx. 30 000 caracteres). Reintentar genera un token y secreto nuevos.
 
 ### Mensajes y errores
 - Sin enlace para una página: el botón queda deshabilitado con «Sin enlace de flujo» (y un aviso con enlace a la configuración); la cola se niega a arrancar y lista las páginas sin enlace.
-- Webhook con error HTTP o inalcanzable → el slot queda en *error* con el motivo (más intento N) y se registra en el log.
-- Sin respuesta tras 10 min (`stale_after_minutes`) → el slot pasa a *error* («Sin respuesta de Activepieces…») y la cola se detiene; se puede reintentar.
+- Webhook con error HTTP o inalcanzable → el slot queda en *error* (`dispatch_error`) con el motivo (más intento N) y se registra en el log.
+- Sin respuesta tras 10 min (`stale_after_minutes`) → el slot pasa a *timeout* y la cola se detiene; se puede reintentar. Si la imagen de esa misma solicitud llega tarde, se acepta.
 - Error informado por el flujo (`error` y opcional `error_code`, p. ej. `content_policy`) → *error* con `[código] mensaje` y cola detenida.
-- Imagen inválida recibida → 422 y el slot queda en *error*.
+- Imagen inválida recibida (base64 roto, no PNG…) → 422 y el slot queda en *error*.
 
 ### Contrato con el flujo
-Payload que recibe el webhook de la página (POST JSON):
+Payload que recibe el webhook de la página (POST JSON, el flujo responde `200 {}` al instante):
 
 ```json
 {
@@ -132,15 +141,20 @@ Payload que recibe el webhook de la página (POST JSON):
 }
 ```
 
-El flujo debe responder rápido (la imagen **no** se espera en esa petición) y, al terminar, hacer `POST callback_url` con el secreto (cabecera `X-Callback-Secret`, `Authorization: Bearer …` o campo `callback_secret`):
+El flujo solo usa `animal_theme`, `prompt` (notas extra), `request_token`, `callback_url` y `callback_secret`. Al terminar hace `POST callback_url` con el secreto (cabecera `X-Callback-Secret`, `Authorization: Bearer …` o campo `callback_secret`):
 
 ```json
-{ "request_token": "…", "image_base64": "<PNG en base64>", "prompt": "…" }
+{ "request_token": "…", "image_base64": "<PNG 1024×1024 en base64, sin prefijo data:>", "prompt": "<prompt final>" }
 ```
 
-(`image_url` es una alternativa a `image_base64`. En caso de fallo: `{ "request_token": "…", "error": "motivo", "error_code": "openai_error" }`.)
+(En caso de fallo: `{ "request_token": "…", "error": "motivo", "error_code": "openai_error" }`. `image_url` sigue aceptándose como alternativa a `image_base64`.)
 
-Respuestas: `401` secreto incorrecto · `503` integración apagada/sin secreto · `422` posición fuera de rango o imagen inválida · `409` `request_token` que no corresponde a la solicitud vigente · `200` guardada (incluye `next_requested` si la cola pidió el siguiente).
+Respuestas: `200` guardada (con `next_requested` si la cola pidió el siguiente; `duplicate: true` si ese token ya se había respondido y no se reprocesa) · `401` secreto incorrecto · `404` libro inexistente · `409` `request_token` distinto al vigente · `422` posición fuera de rango, base64 inválido o imagen que no es PNG · `503` integración apagada. Los errores de validación nunca son 5xx: el flujo solo reintenta el callback ante 5xx o errores de red. Solo se guarda el hash (sha256) del secreto; la ruta tiene rate limit (120/min).
+
+Almacenamiento: `mandalas/001.png` (escalada a 2550) y `mandalas/originals/001.png` (la que devolvió el flujo, ~1024).
+
+### Requisitos del servidor
+Cada callback pesa ~1,7 MB (base64 de ~1,2 MB de PNG) y el escalado a 2550² usa memoria: Nginx `client_max_body_size` ≥ 10M; PHP `post_max_size` y `upload_max_filesize` ≥ 10M y `memory_limit` ≥ 512M; ningún proxy (Coolify/Traefik/Cloudflare) con límite de cuerpo inferior a 10 MB.
 
 ### Escalado a 300 DPI
 Los modelos de imagen devuelven ~1024 px. Al recibir una imagen de Activepieces menor de 2550 px (y `KAWAII_AUTO_UPSCALE=true`) la app la centra en un lienzo cuadrado blanco, la escala a **2550×2550 px** y limpia el trazo (escala de grises de alto contraste) para que pase la validación de 300 DPI. Las subidas manuales nunca se modifican. Esto no añade detalle: es adecuado para colorear, pero no equivale a un escalado con IA.
@@ -151,4 +165,4 @@ Los modelos de imagen devuelven ~1024 px. Al recibir una imagen de Activepieces 
 php artisan test
 ```
 
-Los tests usan SQLite en memoria y un disco falso, sin tocar MySQL ni `storage`. Cubren: paginación (22 y 44 mandalas, mandalas siempre en impares, blancas siempre en pares), validaciones de libro, subida de mandalas, bloqueo de exportación (faltan mandalas / textos / baja resolución), estructura del PDF y el callback de Activepieces (secreto, posición, imagen, token, cola).
+Los tests usan SQLite en memoria y un disco falso, sin tocar MySQL ni `storage`. Cubren: paginación (22 y 44 mandalas, mandalas siempre en impares, blancas siempre en pares), validaciones de libro, subida de mandalas, bloqueo de exportación (faltan mandalas / textos / baja resolución), estructura del PDF el seeder de los 22 flujos y el envío/callback de Activepieces (job en cola, secreto por solicitud, posición, imagen, token, idempotencia, timeout, concurrencia).

@@ -8,6 +8,7 @@ enum GenerationStatus: string
     case Requested = 'requested';
     case Done = 'done';
     case Failed = 'failed';
+    case Timeout = 'timeout';
 
     public function label(): string
     {
@@ -16,6 +17,12 @@ enum GenerationStatus: string
             self::Requested => 'Solicitado',
             self::Done => 'Listo',
             self::Failed => 'Error',
+            self::Timeout => 'Sin respuesta',
         };
+    }
+
+    public function isError(): bool
+    {
+        return $this === self::Failed || $this === self::Timeout;
     }
 }
