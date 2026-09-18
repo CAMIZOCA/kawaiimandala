@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\BookRequest;
 use App\Models\Book;
+use App\Services\ActivepiecesClient;
 use App\Services\BookPaginationService;
 use App\Services\MandalaStorageService;
 use Illuminate\Http\RedirectResponse;
@@ -40,8 +41,12 @@ class BookController extends Controller
             ->with('status', "Libro creado con {$book->mandala_count} slots de mandala.");
     }
 
-    public function show(Book $book)
+    public function show(Book $book, ActivepiecesClient $activepieces)
     {
+        if ($activepieces->expireStale($book) > 0) {
+            $book->refresh();
+        }
+
         $book->load('mandalas');
 
         return view('books.show', compact('book'));

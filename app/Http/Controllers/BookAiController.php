@@ -51,6 +51,10 @@ class BookAiController extends Controller
     /** Light JSON state used by the polling script on the book page. */
     public function status(Book $book): JsonResponse
     {
+        if ($this->client->expireStale($book) > 0) {
+            $book->refresh();
+        }
+
         $mandalas = $book->mandalas()->get();
 
         return response()->json([

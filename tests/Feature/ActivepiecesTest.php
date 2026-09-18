@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Book;
+use App\Models\MandalaFlow;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -17,7 +18,7 @@ class ActivepiecesTest extends TestCase
 
     private const SECRET = 'a-very-long-shared-secret-1234567890';
 
-    private const HOOK = 'https://hooks.test/webhooks/abc';
+    private const HOOK = 'https://hooks.test/webhooks/m';
 
     private Book $book;
 
@@ -28,10 +29,13 @@ class ActivepiecesTest extends TestCase
 
         config([
             'kawaii.activepieces.enabled' => true,
-            'kawaii.activepieces.webhook_url' => self::HOOK,
             'kawaii.activepieces.shared_secret' => self::SECRET,
             'kawaii.activepieces.public_url' => 'https://app.test',
         ]);
+
+        foreach ([1, 2, 3] as $position) {
+            MandalaFlow::create(['position' => $position, 'flow_url' => self::HOOK.$position]);
+        }
 
         $this->book = Book::create(['title' => 'T', 'animal_theme' => 'Capybara', 'mandala_count' => 3]);
         $this->book->syncSlots();
@@ -65,7 +69,7 @@ class ActivepiecesTest extends TestCase
 
     public function test_generate_button_posts_the_expected_payload_and_marks_slot_requested(): void
     {
-        Http::fake([self::HOOK => Http::response(['ok' => true])]);
+        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
 
         $this->actingAs($this->user())
             ->post("/books/{$this->book->uuid}/mandalas/2/generate")
@@ -79,13 +83,13 @@ class ActivepiecesTest extends TestCase
         Http::assertSent(function (HttpRequest $r) use ($mandala) {
             $d = $r->data();
 
-            return $r->url() === self::HOOK
+            return $r->url() === self::HOOK.'2'
                 && $d['book_uuid'] === $this->book->uuid
                 && $d['position'] === 2
                 && $d['count'] === 3
                 && $d['animal_theme'] === 'Capybara'
                 && $d['style_profile'] === 'kawaii_mandala_v1'
-                && $d['output'] === ['format' => 'png', 'width_px' => 2550, 'height_px' => 2550, 'background' => 'white', 'color_mode' => 'black_and_white']
+                && $d['output'] === ['format' => 'png', 'width_px' => 2550, 'height_px' => 2550, 'provider_size' => '1024x1024', 'background' => 'white', 'color_mode' => 'black_and_white']
                 && $d['request_token'] === $mandala->request_token
                 && $d['callback_url'] === "https://app.test/api/activepieces/books/{$this->book->uuid}/mandalas/2"
                 && $d['callback_secret'] === self::SECRET;
@@ -94,7 +98,7 @@ class ActivepiecesTest extends TestCase
 
     public function test_second_request_is_refused_while_one_is_in_flight(): void
     {
-        Http::fake([self::HOOK => Http::response(['ok' => true])]);
+        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
         $user = $this->user();
 
         $this->actingAs($user)->post("/books/{$this->book->uuid}/mandalas/1/generate")->assertSessionHas('status');
@@ -105,7 +109,7 @@ class ActivepiecesTest extends TestCase
 
     public function test_webhook_error_marks_slot_failed_and_app_keeps_working(): void
     {
-        Http::fake([self::HOOK => Http::response('boom', 500)]);
+        Http::fake(['hooks.test/*' => Http::response('boom', 500)]);
 
         $this->actingAs($this->user())
             ->post("/books/{$this->book->uuid}/mandalas/1/generate")
@@ -137,7 +141,7 @@ class ActivepiecesTest extends TestCase
         $this->actingAs($user)->get("/books/{$this->book->uuid}")->assertSee('Generar con AI')->assertSee('por turno');
 
         config(['kawaii.activepieces.enabled' => false]);
-        $this->actingAs($user)->get("/books/{$this->book->uuid}")->assertDontSee('Generar con AI')->assertDontSee('Activepieces');
+        $this->actingAs($user)->get("/books/{$this->book->uuid}")->assertDontSee('Generar con AI')->assertSee('Activepieces está desactivado');
         $this->actingAs($user)->post("/books/{$this->book->uuid}/mandalas/1/generate")->assertSessionHas('error');
     }
 
@@ -197,7 +201,7 @@ class ActivepiecesTest extends TestCase
     public function test_callback_with_valid_image_url_saves_into_the_right_slot(): void
     {
         Http::fake([
-            self::HOOK => Http::response(['ok' => true]),
+            'hooks.test/*' => Http::response(['ok' => true]),
             'https://cdn.test/*' => Http::response($this->pngBytes(320), 200, ['Content-Type' => 'image/png']),
         ]);
         $this->actingAs($this->user())->post("/books/{$this->book->uuid}/mandalas/2/generate");
@@ -214,14 +218,14 @@ class ActivepiecesTest extends TestCase
         $this->assertSame('done', $m2->generation_status->value);
         $this->assertSame('a cute capybara mandala', $m2->prompt);
         $this->assertNull($m2->request_token);
-        $this->assertSame([320, 320], [$m2->width_px, $m2->height_px]);
+        $this->assertSame([2550, 2550], [$m2->width_px, $m2->height_px], 'AI images are upscaled to the print size');
         $this->assertNull($this->book->mandalas()->where('position', 1)->first()->image_path);
         Storage::disk('local')->assertExists($m2->image_path);
     }
 
     public function test_callback_with_wrong_token_is_rejected_while_a_request_is_outstanding(): void
     {
-        Http::fake([self::HOOK => Http::response(['ok' => true])]);
+        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
         $this->actingAs($this->user())->post("/books/{$this->book->uuid}/mandalas/1/generate");
 
         $this->postCallback(1, ['image_base64' => base64_encode($this->pngBytes()), 'request_token' => 'wrong'])->assertStatus(409);
@@ -231,7 +235,7 @@ class ActivepiecesTest extends TestCase
 
     public function test_error_callback_marks_slot_failed_and_stops_queue(): void
     {
-        Http::fake([self::HOOK => Http::response(['ok' => true])]);
+        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
         $this->actingAs($this->user())->post("/books/{$this->book->uuid}/ai/queue");
         $this->assertTrue($this->book->fresh()->ai_queue_active);
 
@@ -247,7 +251,7 @@ class ActivepiecesTest extends TestCase
 
     public function test_queue_requests_one_mandala_at_a_time_and_advances_on_each_callback(): void
     {
-        Http::fake([self::HOOK => Http::response(['ok' => true])]);
+        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
         $user = $this->user();
 
         $this->actingAs($user)->post("/books/{$this->book->uuid}/ai/queue")->assertSessionHas('status');
@@ -276,7 +280,7 @@ class ActivepiecesTest extends TestCase
 
     public function test_queue_skips_slots_that_already_have_an_image(): void
     {
-        Http::fake([self::HOOK => Http::response(['ok' => true])]);
+        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
         $user = $this->user();
         $this->actingAs($user)->post("/books/{$this->book->uuid}/mandalas/1", ['image' => MandalaUploadTest::png('1.png', 300, 300)]);
 
@@ -287,7 +291,7 @@ class ActivepiecesTest extends TestCase
 
     public function test_stopping_the_queue_prevents_further_requests(): void
     {
-        Http::fake([self::HOOK => Http::response(['ok' => true])]);
+        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
         $user = $this->user();
         $this->actingAs($user)->post("/books/{$this->book->uuid}/ai/queue");
         $this->actingAs($user)->post("/books/{$this->book->uuid}/ai/queue/stop");
@@ -300,7 +304,7 @@ class ActivepiecesTest extends TestCase
 
     public function test_status_endpoint_reports_in_flight_slots(): void
     {
-        Http::fake([self::HOOK => Http::response(['ok' => true])]);
+        Http::fake(['hooks.test/*' => Http::response(['ok' => true])]);
         $user = $this->user();
         $this->actingAs($user)->post("/books/{$this->book->uuid}/mandalas/3/generate");
 
@@ -313,7 +317,7 @@ class ActivepiecesTest extends TestCase
 
     public function test_manual_upload_and_pdf_flow_do_not_depend_on_activepieces(): void
     {
-        config(['kawaii.activepieces.enabled' => false, 'kawaii.activepieces.webhook_url' => null]);
+        config(['kawaii.activepieces.enabled' => false]);
         Http::fake(fn () => throw new ConnectionException('down'));
         $user = $this->user();
 

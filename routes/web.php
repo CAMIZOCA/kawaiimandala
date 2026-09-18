@@ -5,6 +5,7 @@ use App\Http\Controllers\BookAiController;
 use App\Http\Controllers\BookController;
 use App\Http\Controllers\BookMandalaController;
 use App\Http\Controllers\BookPdfController;
+use App\Http\Controllers\FlowSettingsController;
 use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/books');
@@ -14,6 +15,9 @@ Route::post('/login', [LoginController::class, 'store'])->name('login.store');
 Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
 
 Route::middleware('auth')->group(function () {
+    Route::get('/settings/flows', [FlowSettingsController::class, 'edit'])->name('settings.flows.edit');
+    Route::put('/settings/flows', [FlowSettingsController::class, 'update'])->name('settings.flows.update');
+
     Route::get('/books', [BookController::class, 'index'])->name('books.index');
     Route::get('/books/new', [BookController::class, 'create'])->name('books.create');
     Route::post('/books', [BookController::class, 'store'])->name('books.store');

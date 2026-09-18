@@ -46,14 +46,24 @@
     $apOn = $ap->isEnabled();
     $apReady = $ap->isConfigured();
     $inFlight = $book->mandalas->filter->isInFlight();
+    $pendingCount = $book->mandala_count - $completed;
+    $missingFlows = $apReady ? $ap->missingFlowPositions($book) : [];
+    $flowless = $apReady ? \App\Models\MandalaFlow::missingFor($book->mandalas->pluck('position')) : [];
 @endphp
-@if ($apOn)
 <div class="card" id="ai-card">
     <h2 style="margin-top:0">Generar con Activepieces</h2>
-    @if (! $apReady)
-        <p class="muted">Activepieces está activado pero falta <code>ACTIVEPIECES_WEBHOOK_URL</code> o un <code>ACTIVEPIECES_SHARED_SECRET</code> de al menos {{ \App\Services\ActivepiecesClient::MIN_SECRET_LENGTH }} caracteres.</p>
+    @if (! $apOn)
+        <div class="flash warn" style="margin-bottom:0">Activepieces está desactivado. Pon <code>ACTIVEPIECES_ENABLED=1</code> en <code>.env</code> para poder generar mandalas con AI (la carga manual sigue funcionando).</div>
+    @elseif (! $ap->hasValidSecret())
+        <div class="flash warn" style="margin-bottom:0">Falta <code>ACTIVEPIECES_SHARED_SECRET</code> (mínimo {{ \App\Services\ActivepiecesClient::MIN_SECRET_LENGTH }} caracteres) en <code>.env</code>.</div>
     @else
-        <p class="muted">Cada mandala se genera en un flujo específico de Activepieces, que devuelve la imagen para guardarla en su slot. Puedes pedir un mandala suelto o dejar que se soliciten «por turno», uno a la vez.</p>
+        <p class="muted">Cada página tiene su propio flujo en Activepieces; el flujo genera el mandala del animal «{{ $book->animal_theme }}» y devuelve la imagen para guardarla en su slot. Puedes pedir un mandala suelto o «por turno», uno a la vez.</p>
+        @if ($warning = $ap->publicUrlWarning())
+            <div class="flash warn">{{ $warning }}</div>
+        @endif
+        @if ($missingFlows)
+            <div class="flash bad">Faltan enlaces de flujo para los mandalas pendientes: <strong>{{ implode(', ', $missingFlows) }}</strong>. <a href="{{ route('settings.flows.edit') }}">Configurar flujos →</a></div>
+        @endif
         <div class="actions">
             @if ($book->ai_queue_active)
                 <span class="badge requested"><span class="spinner"></span> Cola activa</span>
@@ -62,13 +72,15 @@
                 </form>
             @else
                 <form method="POST" action="{{ route('books.ai.start', $book) }}">@csrf
-                    <button class="btn" type="submit" @disabled($completed === $book->mandala_count)>Generar los {{ $book->mandala_count - $completed }} pendientes por turno</button>
+                    <button class="btn" type="submit" @disabled($pendingCount === 0 || $missingFlows)>Generar los {{ $pendingCount }} pendientes por turno</button>
                 </form>
+                @if ($pendingCount === 0) <span class="muted">No hay mandalas pendientes.</span>
+                @elseif ($missingFlows) <span class="muted">Configura primero los enlaces que faltan.</span> @endif
             @endif
+            <a class="btn secondary" href="{{ route('settings.flows.edit') }}">Configurar flujos</a>
         </div>
     @endif
 </div>
-@endif
 
 <h2>Mandalas</h2>
 <div class="slots">
@@ -85,17 +97,19 @@
         @if ($apOn && ! $mandala->hasImage())
             <div class="meta">
                 @if ($mandala->isInFlight())
-                    <span class="badge requested"><span class="spinner"></span> solicitado {{ $mandala->requested_at->format('H:i') }}</span>
+                    <span class="badge requested"><span class="spinner"></span> solicitado {{ $mandala->requested_at->format('H:i') }}@if ($mandala->generation_attempts > 1) · intento {{ $mandala->generation_attempts }}@endif</span>
                 @elseif ($mandala->generation_status === \App\Enums\GenerationStatus::Failed)
-                    <span class="badge failed" title="{{ $mandala->generation_error }}">error</span>
-                    <span title="{{ $mandala->generation_error }}">{{ \Illuminate\Support\Str::limit($mandala->generation_error, 60) }}</span>
+                    <span class="badge failed">error</span> {{ $mandala->generation_error }}
                 @endif
             </div>
         @endif
         @if ($apReady)
+            @if (in_array($mandala->position, $flowless, true))
+                <div class="meta"><a href="{{ route('settings.flows.edit') }}">⚠ Sin enlace de flujo</a></div>
+            @endif
             <form method="POST" action="{{ route('books.mandalas.generate', [$book, $mandala->position]) }}">
                 @csrf
-                <button class="btn small" type="submit" @disabled($mandala->isInFlight())>
+                <button class="btn small" type="submit" @disabled($mandala->isInFlight() || in_array($mandala->position, $flowless, true))>
                     @if ($mandala->isInFlight()) Esperando… @elseif ($mandala->hasImage()) Regenerar con AI @elseif ($mandala->generation_status === \App\Enums\GenerationStatus::Failed) Reintentar @else Generar con AI @endif
                 </button>
             </form>

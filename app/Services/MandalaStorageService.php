@@ -22,6 +22,8 @@ class MandalaStorageService
 
     private const MAX_PIXELS = 100_000_000;
 
+    public function __construct(private readonly MandalaImageProcessor $processor) {}
+
     public function storeUploaded(Mandala $mandala, UploadedFile $file): Mandala
     {
         if (! $file->isValid()) {
@@ -48,6 +50,12 @@ class MandalaStorageService
         ?string $prompt = null,
     ): Mandala {
         [$width, $height, $extension] = $this->inspect($bytes);
+
+        if ($source === 'activepieces' && $this->needsUpscale($width, $height)) {
+            $target = (int) config('kawaii.target_image_px');
+            $bytes = $this->processor->normalize($bytes, $target);
+            [$width, $height, $extension] = [$target, $target, 'png'];
+        }
 
         $disk = Storage::disk('local');
         $this->deleteImage($mandala);
@@ -95,6 +103,12 @@ class MandalaStorageService
         }
 
         return Storage::disk('local')->path($mandala->image_path);
+    }
+
+    private function needsUpscale(int $width, int $height): bool
+    {
+        return config('kawaii.auto_upscale')
+            && min($width, $height) < (int) config('kawaii.target_image_px');
     }
 
     /**

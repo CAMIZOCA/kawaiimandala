@@ -35,8 +35,9 @@ KAWAII_DEFAULT_AUTHOR="Marvin Baptista"
 KAWAII_DEFAULT_MANDALA_COUNT=22
 KAWAII_ALLOW_LOW_RES_EXPORT=false   # solo desarrollo: permite exportar con imágenes < 2250 px
 
+KAWAII_AUTO_UPSCALE=true            # escala a 2550 px las imágenes de Activepieces menores
+
 ACTIVEPIECES_ENABLED=0
-ACTIVEPIECES_WEBHOOK_URL=
 ACTIVEPIECES_SHARED_SECRET=         # mínimo 16 caracteres
 APP_PUBLIC_URL=                     # URL pública de esta app, alcanzable desde Activepieces
 ```
@@ -100,39 +101,49 @@ La vista **Estructura de páginas** (`/books/{uuid}/pages`) muestra el plan comp
 
 ## Activepieces (opcional)
 
-Activepieces solo es una integración por webhook, encapsulada en `App\Services\ActivepiecesClient`. Si está apagado o caído se pueden seguir subiendo imágenes a mano y exportando.
+Activepieces es solo una integración por webhook, encapsulada en `App\Services\ActivepiecesClient`. Si está apagado o caído se puede seguir subiendo imágenes a mano y exportando.
 
-**Un flujo de Activepieces por mandala**: Laravel solicita un mandala concreto, el flujo genera la imagen y la devuelve por callback; Laravel la valida y la guarda en su slot.
+**Un flujo por página.** Cada posición de mandala (1…N) tiene su propio flujo en Activepieces con su propia estructura de mandala; el flujo recibe el **animal** del libro y genera esa página. Los mismos flujos sirven para todos los libros. El prompt para que Cowork cree los 22 flujos está en [`docs/PROMPT_COWORK_ACTIVEPIECES.md`](docs/PROMPT_COWORK_ACTIVEPIECES.md).
 
-1. Crea un flujo con trigger *Catch Webhook* y copia su URL a `ACTIVEPIECES_WEBHOOK_URL`.
-2. Define `ACTIVEPIECES_SHARED_SECRET` (≥ 16 caracteres) y `APP_PUBLIC_URL`; pon `ACTIVEPIECES_ENABLED=1`.
-3. En la ficha del libro aparecen **Generar con AI** (por slot, o *Regenerar/Reintentar*) y **Generar los pendientes por turno** (cola: se solicita un mandala, al recibir su imagen se solicita el siguiente; «Detener cola» la corta; un error también la detiene).
+### Configuración
+1. `.env`: `ACTIVEPIECES_ENABLED=1`, `ACTIVEPIECES_SHARED_SECRET` (≥ 16 caracteres) y `APP_PUBLIC_URL` (URL pública de esta app, alcanzable **desde el servidor de Activepieces**; con `localhost` hace falta un túnel como cloudflared/ngrok o desplegar la app).
+2. En la app: **Configuración → Flujos** (`/settings/flows`): pega el enlace del webhook (URL de producción) de cada mandala. Cada fila se puede desactivar. La página avisa si falta el secreto, si `APP_PUBLIC_URL` parece local o cuántos flujos faltan.
+3. En la ficha del libro: **Generar con AI** por slot (o *Regenerar/Reintentar*) y **Generar los pendientes por turno** (cola: un mandala a la vez; al recibir su imagen se solicita el siguiente).
 
-Payload que recibe el flujo (POST JSON):
+### Mensajes y errores
+- Sin enlace para una página: el botón queda deshabilitado con «Sin enlace de flujo» (y un aviso con enlace a la configuración); la cola se niega a arrancar y lista las páginas sin enlace.
+- Webhook con error HTTP o inalcanzable → el slot queda en *error* con el motivo (más intento N) y se registra en el log.
+- Sin respuesta tras 10 min (`stale_after_minutes`) → el slot pasa a *error* («Sin respuesta de Activepieces…») y la cola se detiene; se puede reintentar.
+- Error informado por el flujo (`error` y opcional `error_code`, p. ej. `content_policy`) → *error* con `[código] mensaje` y cola detenida.
+- Imagen inválida recibida → 422 y el slot queda en *error*.
+
+### Contrato con el flujo
+Payload que recibe el webhook de la página (POST JSON):
 
 ```json
 {
-  "book_uuid": "…", "position": 3, "count": 22,
-  "title": "…", "subtitle": "…", "animal_theme": "capybara", "prompt": null,
+  "book_uuid": "…", "position": 3, "flow_position": 3, "count": 22,
+  "title": "…", "subtitle": "…", "animal_theme": "Capybara", "prompt": null,
   "style_profile": "kawaii_mandala_v1",
-  "output": {"format":"png","width_px":2550,"height_px":2550,"background":"white","color_mode":"black_and_white"},
+  "output": {"format":"png","width_px":2550,"height_px":2550,"provider_size":"1024x1024","background":"white","color_mode":"black_and_white"},
   "request_token": "…",
   "callback_url": "https://APP/api/activepieces/books/UUID/mandalas/3",
   "callback_secret": "…"
 }
 ```
 
-El flujo debe responder rápido al webhook (la imagen **no** se espera en esa petición) y, al terminar, hacer `POST callback_url` con el secreto (cabecera `X-Callback-Secret`, `Authorization: Bearer …` o campo `callback_secret`) y:
+El flujo debe responder rápido (la imagen **no** se espera en esa petición) y, al terminar, hacer `POST callback_url` con el secreto (cabecera `X-Callback-Secret`, `Authorization: Bearer …` o campo `callback_secret`):
 
 ```json
-{ "request_token": "…", "image_url": "https://…/mandala.png", "prompt": "…" }
+{ "request_token": "…", "image_base64": "<PNG en base64>", "prompt": "…" }
 ```
 
-(`image_base64` es una alternativa a `image_url`; en caso de fallo: `{ "request_token": "…", "error": "motivo" }`.)
+(`image_url` es una alternativa a `image_base64`. En caso de fallo: `{ "request_token": "…", "error": "motivo", "error_code": "openai_error" }`.)
 
 Respuestas: `401` secreto incorrecto · `503` integración apagada/sin secreto · `422` posición fuera de rango o imagen inválida · `409` `request_token` que no corresponde a la solicitud vigente · `200` guardada (incluye `next_requested` si la cola pidió el siguiente).
 
-Si un mandala queda «solicitado» más de 10 minutos (`stale_after_minutes`) se puede volver a solicitar.
+### Escalado a 300 DPI
+Los modelos de imagen devuelven ~1024 px. Al recibir una imagen de Activepieces menor de 2550 px (y `KAWAII_AUTO_UPSCALE=true`) la app la centra en un lienzo cuadrado blanco, la escala a **2550×2550 px** y limpia el trazo (escala de grises de alto contraste) para que pase la validación de 300 DPI. Las subidas manuales nunca se modifican. Esto no añade detalle: es adecuado para colorear, pero no equivale a un escalado con IA.
 
 ## Tests
 

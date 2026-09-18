@@ -11,9 +11,13 @@
 <header class="top">
     <a class="brand" href="{{ route('books.index') }}">🌸 {{ config('app.name') }}</a>
     @auth
-        <form method="POST" action="{{ route('logout') }}">@csrf
-            <button class="btn secondary small" type="submit">Salir</button>
-        </form>
+        <nav style="display:flex;gap:.75rem;align-items:center">
+            <a href="{{ route('books.index') }}">Libros</a>
+            <a href="{{ route('settings.flows.edit') }}">Configuración</a>
+            <form method="POST" action="{{ route('logout') }}" style="margin:0">@csrf
+                <button class="btn secondary small" type="submit">Salir</button>
+            </form>
+        </nav>
     @endauth
 </header>
 <main>

@@ -19,9 +19,12 @@ return [
     'max_upload_kb' => 30720,
     'allow_low_res_export' => (bool) env('KAWAII_ALLOW_LOW_RES_EXPORT', false),
 
+    // Images returned by Activepieces below target_image_px are padded to a square,
+    // upscaled to target_image_px and cleaned to crisp black-on-white line art.
+    'auto_upscale' => (bool) env('KAWAII_AUTO_UPSCALE', true),
+
     'activepieces' => [
         'enabled' => (bool) env('ACTIVEPIECES_ENABLED', false),
-        'webhook_url' => env('ACTIVEPIECES_WEBHOOK_URL'),
         'shared_secret' => env('ACTIVEPIECES_SHARED_SECRET'),
         'public_url' => env('APP_PUBLIC_URL'),
         'style_profile' => 'kawaii_mandala_v1',

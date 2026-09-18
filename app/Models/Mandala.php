@@ -18,6 +18,7 @@ class Mandala extends Model
             'position' => 'integer',
             'width_px' => 'integer',
             'height_px' => 'integer',
+            'generation_attempts' => 'integer',
         ];
     }
 
@@ -49,6 +50,12 @@ class Mandala extends Model
         $stale = now()->subMinutes(config('kawaii.activepieces.stale_after_minutes'));
 
         return $this->requested_at !== null && $this->requested_at->greaterThan($stale);
+    }
+
+    /** Requested long ago without any callback (the slot is normally expired first). */
+    public function isStale(): bool
+    {
+        return $this->generation_status === GenerationStatus::Requested && ! $this->isInFlight();
     }
 
     public function label(): string
