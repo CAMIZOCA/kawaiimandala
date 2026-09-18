@@ -1,0 +1,120 @@
+# Kawaii Mandala — build pack "Docker Compose" de Coolify.
+# Coolify inyecta las variables de entorno y las etiquetas de Traefik del dominio.
+
+x-app-environment: &app-environment
+  APP_NAME: '${APP_NAME:-Kawaii Mandala}'
+  APP_ENV: '${APP_ENV:-production}'
+  APP_KEY: '${APP_KEY}'
+  APP_DEBUG: '${APP_DEBUG:-false}'
+  APP_URL: '${APP_URL}'
+  APP_LOCALE: '${APP_LOCALE:-en}'
+  APP_FALLBACK_LOCALE: '${APP_FALLBACK_LOCALE:-en}'
+
+  DB_CONNECTION: mysql
+  DB_HOST: mariadb
+  DB_PORT: '3306'
+  DB_DATABASE: '${DB_DATABASE:-kawaiimandala}'
+  DB_USERNAME: '${DB_USERNAME:-kawaii}'
+  DB_PASSWORD: '${DB_PASSWORD}'
+
+  SESSION_DRIVER: database
+  SESSION_LIFETIME: '${SESSION_LIFETIME:-480}'
+  SESSION_SECURE_COOKIE: '${SESSION_SECURE_COOKIE:-true}'
+  QUEUE_CONNECTION: database
+  CACHE_STORE: database
+  FILESYSTEM_DISK: local
+  BROADCAST_CONNECTION: log
+  LOG_CHANNEL: stderr
+  LOG_LEVEL: '${LOG_LEVEL:-warning}'
+  MAIL_MAILER: log
+
+  KAWAII_DEFAULT_AUTHOR: '${KAWAII_DEFAULT_AUTHOR:-Marvin Baptista}'
+  KAWAII_DEFAULT_MANDALA_COUNT: '${KAWAII_DEFAULT_MANDALA_COUNT:-22}'
+  KAWAII_ALLOW_LOW_RES_EXPORT: '${KAWAII_ALLOW_LOW_RES_EXPORT:-false}'
+  KAWAII_AUTO_UPSCALE: '${KAWAII_AUTO_UPSCALE:-true}'
+  ACTIVEPIECES_ENABLED: '${ACTIVEPIECES_ENABLED:-0}'
+  ACTIVEPIECES_BASE_URL: '${ACTIVEPIECES_BASE_URL:-https://activepieces.medio-digital.net}'
+  ACTIVEPIECES_MAX_CONCURRENT: '${ACTIVEPIECES_MAX_CONCURRENT:-1}'
+  APP_PUBLIC_URL: '${APP_PUBLIC_URL}'
+
+services:
+  mariadb:
+    image: 'mariadb:11.4'
+    restart: unless-stopped
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+    environment:
+      MARIADB_ROOT_PASSWORD: '${MYSQL_ROOT_PASSWORD}'
+      MARIADB_DATABASE: '${DB_DATABASE:-kawaiimandala}'
+      MARIADB_USER: '${DB_USERNAME:-kawaii}'
+      MARIADB_PASSWORD: '${DB_PASSWORD}'
+    volumes:
+      - 'kawaii_mariadb:/var/lib/mysql'
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      CONTAINER_ROLE: app
+      ADMIN_EMAIL: '${ADMIN_EMAIL:-}'
+      ADMIN_NAME: '${ADMIN_NAME:-Admin}'
+      ADMIN_PASSWORD: '${ADMIN_PASSWORD:-}'
+    expose:
+      - '8080'
+    volumes:
+      - 'kawaii_storage:/var/www/html/storage'
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  # Envia los POST a los webhooks de Activepieces (job SendMandalaRequest).
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      CONTAINER_ROLE: worker
+    command: ['php', 'artisan', 'queue:work', '--sleep=3', '--tries=1', '--timeout=60']
+    volumes:
+      - 'kawaii_storage:/var/www/html/storage'
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
+  # activepieces:expire-stale cada minuto.
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      CONTAINER_ROLE: scheduler
+    command: ['php', 'artisan', 'schedule:work']
+    volumes:
+      - 'kawaii_storage:/var/www/html/storage'
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
+volumes:
+  kawaii_mariadb:
+  kawaii_storage:
