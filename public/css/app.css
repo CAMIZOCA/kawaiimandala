@@ -1,0 +1,49 @@
+:root{--bg:#faf8f5;--card:#fff;--ink:#2b2622;--muted:#7a716a;--line:#e6dfd7;--accent:#c2547a;--accent-d:#a13f62;--ok:#2f8f5b;--warn:#c98a12;--err:#c0392b;--radius:10px}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+header.top{background:var(--card);border-bottom:1px solid var(--line);padding:.7rem 1.25rem;display:flex;align-items:center;justify-content:space-between}
+header.top .brand{font-weight:700;font-size:1.1rem;color:var(--ink)}
+main{max-width:1100px;margin:1.5rem auto;padding:0 1rem}
+h1{margin:.2rem 0 1rem;font-size:1.6rem}h2{font-size:1.15rem;margin:1.5rem 0 .6rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:1.1rem 1.25rem;margin-bottom:1rem}
+.btn{display:inline-block;border:1px solid var(--accent);background:var(--accent);color:#fff;padding:.45rem .9rem;border-radius:8px;font:inherit;cursor:pointer;text-decoration:none}
+.btn:hover{background:var(--accent-d);text-decoration:none}
+.btn.secondary{background:#fff;color:var(--accent)}.btn.secondary:hover{background:#fbeff3}
+.btn.danger{background:#fff;color:var(--err);border-color:var(--err)}
+.btn.small{padding:.2rem .55rem;font-size:.82rem}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.actions{display:flex;flex-wrap:wrap;gap:.5rem;margin:.75rem 0}
+.actions form{margin:0}
+label{display:block;font-weight:600;margin:.8rem 0 .25rem}
+input[type=text],input[type=email],input[type=password],input[type=number],input[type=url],textarea,input[type=file]{width:100%;padding:.5rem .65rem;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+textarea{min-height:110px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 1rem}
+@media(max-width:700px){.grid2{grid-template-columns:1fr}}
+.err{color:var(--err);font-size:.85rem;margin-top:.2rem}
+.flash{padding:.7rem 1rem;border-radius:8px;margin-bottom:1rem}
+.flash.ok{background:#e6f5ec;border:1px solid #b8e0c8}.flash.bad{background:#fbe9e7;border:1px solid #efc1bb}.flash.warn{background:#fdf3dd;border:1px solid #f0d9a0}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-size:.8rem;text-transform:uppercase;color:var(--muted)}
+.badge{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.78rem;background:#eee;color:#555}
+.badge.ready,.badge.done,.badge.exported{background:#e6f5ec;color:var(--ok)}
+.badge.waiting_mandalas,.badge.requested{background:#fdf3dd;color:var(--warn)}
+.badge.error,.badge.failed{background:#fbe9e7;color:var(--err)}
+.muted{color:var(--muted)}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.8rem}
+.slot{border:1px solid var(--line);border-radius:var(--radius);background:#fff;padding:.5rem;display:flex;flex-direction:column;gap:.35rem}
+.slot .num{font-weight:700}
+.slot .thumb{aspect-ratio:1;border:1px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);overflow:hidden;background:#fcfbf9}
+.slot .thumb img{width:100%;height:100%;object-fit:contain}
+.slot .meta{font-size:.75rem;color:var(--muted)}
+.slot form{margin:0}
+.slot input[type=file]{font-size:.75rem;padding:.25rem}
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.6rem 1.5rem}
+.summary dt{font-size:.75rem;text-transform:uppercase;color:var(--muted)}.summary dd{margin:0 0 .4rem;font-weight:600}
+.pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:.5rem}
+.pg{display:flex;justify-content:space-between;align-items:center;padding:.4rem .7rem;border:1px solid var(--line);border-radius:8px;background:#fff}
+.pg.mandala{background:#fbeff3;border-color:#efc4d3}.pg.blank{background:#f4f4f4;color:var(--muted)}
+.pg .side{font-size:.7rem;font-weight:700;letter-spacing:.03em}.pg .side.right{color:var(--ok)}.pg .side.left{color:var(--muted)}
+.spinner{display:inline-block;width:.8em;height:.8em;border:2px solid var(--warn);border-right-color:transparent;border-radius:50%;animation:spin 1s linear infinite;vertical-align:-.1em}
+@keyframes spin{to{transform:rotate(360deg)}}
+.login{max-width:380px;margin:4rem auto}

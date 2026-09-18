@@ -1,0 +1,131 @@
+<?php
+
+namespace App\Services;
+
+use App\Enums\GenerationStatus;
+use App\Exceptions\InvalidMandalaImageException;
+use App\Models\Book;
+use App\Models\Mandala;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+
+/**
+ * Validates and stores mandala images under
+ * storage/app/private/books/{uuid}/mandalas/001.png (internal safe names only).
+ */
+class MandalaStorageService
+{
+    private const TYPES = [
+        IMAGETYPE_PNG => ['png', 'image/png'],
+        IMAGETYPE_JPEG => ['jpg', 'image/jpeg'],
+    ];
+
+    private const MAX_PIXELS = 100_000_000;
+
+    public function storeUploaded(Mandala $mandala, UploadedFile $file): Mandala
+    {
+        if (! $file->isValid()) {
+            throw new InvalidMandalaImageException('La subida del archivo falló.');
+        }
+
+        $bytes = @file_get_contents($file->getRealPath());
+
+        if ($bytes === false) {
+            throw new InvalidMandalaImageException('No se pudo leer el archivo subido.');
+        }
+
+        return $this->storeBinary($mandala, $bytes, $file->getClientOriginalName());
+    }
+
+    /**
+     * @throws InvalidMandalaImageException
+     */
+    public function storeBinary(
+        Mandala $mandala,
+        string $bytes,
+        ?string $originalName = null,
+        string $source = 'manual',
+        ?string $prompt = null,
+    ): Mandala {
+        [$width, $height, $extension] = $this->inspect($bytes);
+
+        $disk = Storage::disk('local');
+        $this->deleteImage($mandala);
+
+        $path = $mandala->book->storageDir('mandalas').'/'.str_pad((string) $mandala->position, 3, '0', STR_PAD_LEFT).'.'.$extension;
+        $disk->put($path, $bytes);
+
+        $mandala->forceFill([
+            'image_path' => $path,
+            'original_filename' => $originalName !== null ? mb_substr(basename($originalName), 0, 255) : null,
+            'width_px' => $width,
+            'height_px' => $height,
+            'generation_source' => $source,
+            'generation_status' => $source === 'activepieces' ? GenerationStatus::Done : $mandala->generation_status,
+            'request_token' => null,
+            'generation_error' => null,
+        ]);
+
+        if ($prompt !== null) {
+            $mandala->prompt = $prompt;
+        }
+
+        $mandala->save();
+        $mandala->book->refreshStatus();
+
+        return $mandala;
+    }
+
+    public function deleteImage(Mandala $mandala): void
+    {
+        if ($mandala->image_path !== null) {
+            Storage::disk('local')->delete($mandala->image_path);
+        }
+    }
+
+    public function deleteBookFiles(Book $book): void
+    {
+        Storage::disk('local')->deleteDirectory($book->storageDir());
+    }
+
+    public function absolutePath(Mandala $mandala): ?string
+    {
+        if (! $mandala->hasImage() || ! Storage::disk('local')->exists($mandala->image_path)) {
+            return null;
+        }
+
+        return Storage::disk('local')->path($mandala->image_path);
+    }
+
+    /**
+     * @return array{0:int,1:int,2:string} width, height, extension
+     */
+    private function inspect(string $bytes): array
+    {
+        $maxBytes = config('kawaii.max_upload_kb') * 1024;
+
+        if ($bytes === '' || strlen($bytes) > $maxBytes) {
+            throw new InvalidMandalaImageException('El archivo está vacío o supera el tamaño máximo de '.config('kawaii.max_upload_kb').' KB.');
+        }
+
+        $info = @getimagesizefromstring($bytes);
+
+        if ($info === false || ! isset(self::TYPES[$info[2]])) {
+            throw new InvalidMandalaImageException('El archivo no es una imagen PNG o JPG válida.');
+        }
+
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
+
+        if ($mime !== self::TYPES[$info[2]][1]) {
+            throw new InvalidMandalaImageException('El tipo real del archivo no coincide con una imagen PNG/JPG.');
+        }
+
+        [$width, $height] = $info;
+
+        if ($width < 1 || $height < 1 || $width * $height > self::MAX_PIXELS) {
+            throw new InvalidMandalaImageException('Las dimensiones de la imagen no son válidas.');
+        }
+
+        return [$width, $height, self::TYPES[$info[2]][0]];
+    }
+}

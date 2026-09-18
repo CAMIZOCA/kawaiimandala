@@ -1,7 +1,28 @@
 <?php
 
+use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\BookController;
+use App\Http\Controllers\BookMandalaController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
+Route::redirect('/', '/books');
+
+Route::get('/login', [LoginController::class, 'show'])->name('login');
+Route::post('/login', [LoginController::class, 'store'])->name('login.store');
+Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
+
+Route::middleware('auth')->group(function () {
+    Route::get('/books', [BookController::class, 'index'])->name('books.index');
+    Route::get('/books/new', [BookController::class, 'create'])->name('books.create');
+    Route::post('/books', [BookController::class, 'store'])->name('books.store');
+    Route::get('/books/{book}', [BookController::class, 'show'])->name('books.show');
+    Route::get('/books/{book}/edit', [BookController::class, 'edit'])->name('books.edit');
+    Route::put('/books/{book}', [BookController::class, 'update'])->name('books.update');
+    Route::delete('/books/{book}', [BookController::class, 'destroy'])->name('books.destroy');
+    Route::get('/books/{book}/pages', [BookController::class, 'pages'])->name('books.pages');
+
+    Route::post('/books/{book}/mandalas', [BookMandalaController::class, 'uploadMany'])->name('books.mandalas.upload-many');
+    Route::post('/books/{book}/mandalas/{position}', [BookMandalaController::class, 'upload'])->whereNumber('position')->name('books.mandalas.upload');
+    Route::get('/books/{book}/mandalas/{position}/image', [BookMandalaController::class, 'image'])->whereNumber('position')->name('books.mandalas.image');
+    Route::delete('/books/{book}/mandalas/{position}', [BookMandalaController::class, 'destroy'])->whereNumber('position')->name('books.mandalas.destroy');
 });
