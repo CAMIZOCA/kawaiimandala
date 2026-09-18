@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\BookAiController;
 use App\Http\Controllers\BookController;
 use App\Http\Controllers\BookMandalaController;
 use App\Http\Controllers\BookPdfController;
@@ -20,6 +21,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/books/{book}/edit', [BookController::class, 'edit'])->name('books.edit');
     Route::put('/books/{book}', [BookController::class, 'update'])->name('books.update');
     Route::delete('/books/{book}', [BookController::class, 'destroy'])->name('books.destroy');
+    Route::get('/books/{book}/status', [BookAiController::class, 'status'])->name('books.status');
+    Route::post('/books/{book}/mandalas/{position}/generate', [BookAiController::class, 'generateOne'])->whereNumber('position')->name('books.mandalas.generate');
+    Route::post('/books/{book}/ai/queue', [BookAiController::class, 'startQueue'])->name('books.ai.start');
+    Route::post('/books/{book}/ai/queue/stop', [BookAiController::class, 'stopQueue'])->name('books.ai.stop');
     Route::get('/books/{book}/pdf/preview', [BookPdfController::class, 'preview'])->name('books.pdf.preview');
     Route::post('/books/{book}/pdf/export', [BookPdfController::class, 'export'])->name('books.pdf.export');
     Route::get('/books/{book}/pdf/download', [BookPdfController::class, 'download'])->name('books.pdf.download');

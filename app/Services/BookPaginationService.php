@@ -15,9 +15,13 @@ namespace App\Services;
 class BookPaginationService
 {
     public const TYPE_TITLE = 'title';
+
     public const TYPE_INTRODUCTION = 'introduction';
+
     public const TYPE_MANDALA = 'mandala';
+
     public const TYPE_BLANK = 'blank';
+
     public const TYPE_CREATOR = 'creator';
 
     /**

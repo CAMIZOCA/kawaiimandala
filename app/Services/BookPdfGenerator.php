@@ -17,7 +17,9 @@ use Mpdf\Mpdf;
 class BookPdfGenerator
 {
     private const PAGE_MM = 215.9;
+
     private const MARGIN_MM = 12.7;
+
     private const USABLE_MM = 190.5;
 
     public function __construct(

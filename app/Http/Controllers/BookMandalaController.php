@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\GenerationStatus;
 use App\Exceptions\InvalidMandalaImageException;
 use App\Models\Book;
 use App\Models\Mandala;
@@ -87,6 +88,8 @@ class BookMandalaController extends Controller
         $this->storage->deleteImage($mandala);
         $mandala->forceFill([
             'image_path' => null, 'original_filename' => null, 'width_px' => null, 'height_px' => null,
+            'generation_status' => GenerationStatus::Pending, 'request_token' => null,
+            'requested_at' => null, 'generation_error' => null,
         ])->save();
         $book->refresh()->refreshStatus();
 

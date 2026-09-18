@@ -61,7 +61,7 @@ class MandalaStorageService
             'width_px' => $width,
             'height_px' => $height,
             'generation_source' => $source,
-            'generation_status' => $source === 'activepieces' ? GenerationStatus::Done : $mandala->generation_status,
+            'generation_status' => GenerationStatus::Done,
             'request_token' => null,
             'generation_error' => null,
         ]);

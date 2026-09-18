@@ -1,7 +1,9 @@
 @extends('layouts.app')
 @section('title', $book->title)
 @section('content')
-@php($completed = $book->mandalas->whereNotNull('image_path')->count())
+@php
+    $completed = $book->mandalas->whereNotNull('image_path')->count();
+@endphp
 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
     <h1>{{ $book->title }}</h1>
     <a class="btn secondary small" href="{{ route('books.index') }}">← Libros</a>
@@ -39,6 +41,35 @@
     </form>
 </div>
 
+@php
+    $ap = app(\App\Services\ActivepiecesClient::class);
+    $apOn = $ap->isEnabled();
+    $apReady = $ap->isConfigured();
+    $inFlight = $book->mandalas->filter->isInFlight();
+@endphp
+@if ($apOn)
+<div class="card" id="ai-card">
+    <h2 style="margin-top:0">Generar con Activepieces</h2>
+    @if (! $apReady)
+        <p class="muted">Activepieces está activado pero falta <code>ACTIVEPIECES_WEBHOOK_URL</code> o un <code>ACTIVEPIECES_SHARED_SECRET</code> de al menos {{ \App\Services\ActivepiecesClient::MIN_SECRET_LENGTH }} caracteres.</p>
+    @else
+        <p class="muted">Cada mandala se genera en un flujo específico de Activepieces, que devuelve la imagen para guardarla en su slot. Puedes pedir un mandala suelto o dejar que se soliciten «por turno», uno a la vez.</p>
+        <div class="actions">
+            @if ($book->ai_queue_active)
+                <span class="badge requested"><span class="spinner"></span> Cola activa</span>
+                <form method="POST" action="{{ route('books.ai.stop', $book) }}">@csrf
+                    <button class="btn danger" type="submit">Detener cola</button>
+                </form>
+            @else
+                <form method="POST" action="{{ route('books.ai.start', $book) }}">@csrf
+                    <button class="btn" type="submit" @disabled($completed === $book->mandala_count)>Generar los {{ $book->mandala_count - $completed }} pendientes por turno</button>
+                </form>
+            @endif
+        </div>
+    @endif
+</div>
+@endif
+
 <h2>Mandalas</h2>
 <div class="slots">
 @foreach ($book->mandalas as $mandala)
@@ -51,6 +82,24 @@
                 pendiente
             @endif
         </div>
+        @if ($apOn && ! $mandala->hasImage())
+            <div class="meta">
+                @if ($mandala->isInFlight())
+                    <span class="badge requested"><span class="spinner"></span> solicitado {{ $mandala->requested_at->format('H:i') }}</span>
+                @elseif ($mandala->generation_status === \App\Enums\GenerationStatus::Failed)
+                    <span class="badge failed" title="{{ $mandala->generation_error }}">error</span>
+                    <span title="{{ $mandala->generation_error }}">{{ \Illuminate\Support\Str::limit($mandala->generation_error, 60) }}</span>
+                @endif
+            </div>
+        @endif
+        @if ($apReady)
+            <form method="POST" action="{{ route('books.mandalas.generate', [$book, $mandala->position]) }}">
+                @csrf
+                <button class="btn small" type="submit" @disabled($mandala->isInFlight())>
+                    @if ($mandala->isInFlight()) Esperando… @elseif ($mandala->hasImage()) Regenerar con AI @elseif ($mandala->generation_status === \App\Enums\GenerationStatus::Failed) Reintentar @else Generar con AI @endif
+                </button>
+            </form>
+        @endif
         @if ($mandala->hasImage())
             <div class="meta">{{ $mandala->width_px }}×{{ $mandala->height_px }} px · {{ $mandala->generation_source }}
                 @if ($mandala->isLowRes()) <br><strong style="color:var(--warn)">⚠ baja resolución</strong> @endif
@@ -70,4 +119,27 @@
     </div>
 @endforeach
 </div>
+@if ($apReady && ($inFlight->isNotEmpty() || $book->ai_queue_active))
+@push('scripts')
+<script>
+    // Poll only while a generation is pending; reload when a slot resolves.
+    (function () {
+        const url = @json(route('books.status', $book));
+        let known = null;
+        async function tick() {
+            try {
+                const r = await fetch(url, {headers: {'Accept': 'application/json'}});
+                if (!r.ok) return;
+                const d = await r.json();
+                const sig = d.mandalas.map(m => m.position + ':' + m.status + ':' + (m.has_image ? 1 : 0)).join('|') + '#' + d.ai_queue_active;
+                if (known !== null && sig !== known) { location.reload(); return; }
+                known = sig;
+            } catch (e) { /* network hiccup: try again next tick */ }
+        }
+        tick();
+        setInterval(tick, 5000);
+    })();
+</script>
+@endpush
+@endif
 @endsection
