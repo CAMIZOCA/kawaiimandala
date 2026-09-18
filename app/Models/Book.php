@@ -68,17 +68,16 @@ class Book extends Model
         $this->mandalas()->where('position', '>', $this->mandala_count)->whereNull('image_path')->delete();
     }
 
-    /** Recompute the status from the slots (never touches an errored book). */
+    /**
+     * Recompute the status from the slots. Called after any content change, so a
+     * previously exported book goes back to "ready" (its export is now stale).
+     */
     public function refreshStatus(): void
     {
-        if ($this->status === BookStatus::Error) {
-            return;
-        }
-
         $complete = $this->completedCount() === $this->mandala_count;
 
         if ($complete) {
-            $status = $this->status === BookStatus::Exported ? BookStatus::Exported : BookStatus::Ready;
+            $status = BookStatus::Ready;
         } elseif ($this->mandalas()->where('generation_status', GenerationStatus::Requested->value)->exists()) {
             $status = BookStatus::WaitingMandalas;
         } else {

@@ -18,6 +18,13 @@
     <div class="actions">
         <a class="btn secondary" href="{{ route('books.edit', $book) }}">Editar libro</a>
         <a class="btn secondary" href="{{ route('books.pages', $book) }}">Ver estructura de páginas</a>
+        <a class="btn secondary" href="{{ route('books.pdf.preview', $book) }}" target="_blank">Previsualizar PDF</a>
+        <form method="POST" action="{{ route('books.pdf.export', $book) }}">@csrf
+            <button class="btn" type="submit">Exportar PDF</button>
+        </form>
+        @if (\Illuminate\Support\Facades\Storage::disk('local')->exists($book->storageDir('exports').'/'.(\Illuminate\Support\Str::slug($book->title) ?: 'book').'-interior-8.5x8.5.pdf'))
+            <a class="btn secondary" href="{{ route('books.pdf.download', $book) }}">Descargar último PDF</a>
+        @endif
     </div>
 </div>
 

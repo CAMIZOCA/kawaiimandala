@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\BookController;
 use App\Http\Controllers\BookMandalaController;
+use App\Http\Controllers\BookPdfController;
 use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/books');
@@ -19,6 +20,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/books/{book}/edit', [BookController::class, 'edit'])->name('books.edit');
     Route::put('/books/{book}', [BookController::class, 'update'])->name('books.update');
     Route::delete('/books/{book}', [BookController::class, 'destroy'])->name('books.destroy');
+    Route::get('/books/{book}/pdf/preview', [BookPdfController::class, 'preview'])->name('books.pdf.preview');
+    Route::post('/books/{book}/pdf/export', [BookPdfController::class, 'export'])->name('books.pdf.export');
+    Route::get('/books/{book}/pdf/download', [BookPdfController::class, 'download'])->name('books.pdf.download');
     Route::get('/books/{book}/pages', [BookController::class, 'pages'])->name('books.pages');
 
     Route::post('/books/{book}/mandalas', [BookMandalaController::class, 'uploadMany'])->name('books.mandalas.upload-many');
